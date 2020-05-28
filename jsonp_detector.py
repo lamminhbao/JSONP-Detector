@@ -34,16 +34,21 @@ class BurpExtender(IBurpExtender, IScannerCheck):
         requestInfo = self._helpers.analyzeRequest(baseRequestResponse)
         responseInfo = self._helpers.analyzeResponse(baseRequestResponse.getResponse())
 
-        if responseInfo.getStatedMimeType() == 'script':
+        res = []
+
+        if responseInfo.getInferredMimeType() == 'script':
+            # debug
+            print('passive', self._helpers.analyzeRequest(baseRequestResponse).getUrl(), responseInfo.getInferredMimeType())
             for param in requestInfo.getParameters():
                 if (
                     param.getType() == IParameter.PARAM_URL and \
                     param.getName() in CALLBACK_PARAMS
                 ):
-
+                    # debug
+                    print('detect', self._helpers.analyzeRequest(baseRequestResponse).getUrl(), responseInfo.getInferredMimeType())
                     issue_detail = 'Passively detect with callback param: %s' % param.getName()
 
-                    return [
+                    res.append(
                         CustomScanIssue(
                             baseRequestResponse.getHttpService(),
                             self._helpers.analyzeRequest(baseRequestResponse).getUrl(),
@@ -52,57 +57,51 @@ class BurpExtender(IBurpExtender, IScannerCheck):
                             issue_detail,
                             'Information'
                         )
-                    ]
+                    )
+        elif (
+            requestInfo.getMethod() == 'GET' and \
+            responseInfo.getInferredMimeType() == 'JSON'
+        ):
+            # debug
+            print('active', self._helpers.analyzeRequest(baseRequestResponse).getUrl(), responseInfo.getInferredMimeType())
+            # add callback param to request and fire
+            for param_name in CALLBACK_PARAMS:
+                callback_param = \
+                    self._helpers.buildParameter(
+                        param_name,
+                        'myCallbackkk',
+                        IParameter.PARAM_URL
+                    )
 
-        return None
+                rawRequest = baseRequestResponse.getRequest()
+                checkRequest = self._helpers.addParameter(rawRequest, callback_param)
+                checkRequestResponse = self._callbacks.makeHttpRequest(
+                        baseRequestResponse.getHttpService(), checkRequest)
+
+                checkResponse = self._helpers.analyzeResponse(checkRequestResponse.getResponse())
+
+                if (
+                    checkResponse.getInferredMimeType() == 'script' and \
+                    callback_param.getValue() in self._helpers.bytesToString(checkRequestResponse.getResponse())
+                ):
+                    # debug
+                    print('detect', self._helpers.analyzeRequest(baseRequestResponse).getUrl(), callback_param.getName(), checkResponse.getInferredMimeType())
+                    issue_detail = 'Actively detect with callback param: %s' % callback_param.getName()
+                    res.append(
+                        CustomScanIssue(
+                            baseRequestResponse.getHttpService(),
+                            self._helpers.analyzeRequest(baseRequestResponse).getUrl(),
+                            [checkRequestResponse],
+                            'JSONP Endpoint',
+                            issue_detail,
+                            'Information'
+                        )
+                    )
+                    break
+
+        return res if res else None
 
     def doActiveScan(self, baseRequestResponse, insertionPoint):
-        # choose a insertion point type that's
-        # the only insertion point for the base request
-        if insertionPoint.getInsertionPointType() == IScannerInsertionPoint.INS_URL_PATH_FILENAME:
-            requestInfo = self._helpers.analyzeRequest(baseRequestResponse)
-            responseInfo = self._helpers.analyzeResponse(baseRequestResponse.getResponse())
-
-            # debug
-            # print(self._helpers.analyzeRequest(baseRequestResponse).getUrl(), responseInfo.getStatedMimeType())
-
-            if (
-                requestInfo.getMethod() == 'GET' and \
-                responseInfo.getStatedMimeType() in ['JSON', 'script']
-            ):
-                # add callback param to request and fire
-                for param_name in CALLBACK_PARAMS:
-                    callback_param = \
-                        self._helpers.buildParameter(
-                            param_name,
-                            'myCallbackkk',
-                            IParameter.PARAM_URL
-                        )
-
-                    rawRequest = baseRequestResponse.getRequest()
-                    checkRequest = self._helpers.addParameter(rawRequest, callback_param)
-                    checkRequestResponse = self._callbacks.makeHttpRequest(
-                            baseRequestResponse.getHttpService(), checkRequest)
-
-                    checkResponse = self._helpers.analyzeResponse(checkRequestResponse.getResponse())
-                    # debug
-                    # print(self._helpers.analyzeRequest(baseRequestResponse).getUrl(), callback_param.getName(), checkResponse.getStatedMimeType())
-                    if (
-                        checkResponse.getStatedMimeType() == 'script' and \
-                        callback_param.getValue() in self._helpers.bytesToString(checkRequestResponse.getResponse())
-                    ):
-                        issue_detail = 'Actively detect with callback param: %s' % callback_param.getName()
-                        return [
-                            CustomScanIssue(
-                                baseRequestResponse.getHttpService(),
-                                self._helpers.analyzeRequest(baseRequestResponse).getUrl(),
-                                [checkRequestResponse],
-                                'JSONP Endpoint',
-                                issue_detail,
-                                'Information'
-                            )
-                        ]
-
         return None
 
     def consolidateDuplicateIssues(self, existingIssue, newIssue):
