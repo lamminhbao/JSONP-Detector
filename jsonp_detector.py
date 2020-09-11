@@ -4,6 +4,7 @@ from burp import IScanIssue
 from burp import IParameter
 from burp import IScannerInsertionPoint
 from array import array
+from time import sleep
 
 CALLBACK_PARAMS = ['callback', 'cb', 'jsonp', 'jsonpcallback', 'jcb', 'call']
 
@@ -46,7 +47,7 @@ class BurpExtender(IBurpExtender, IScannerCheck):
                 ):
                     # debug
                     print('detect', self._helpers.analyzeRequest(baseRequestResponse).getUrl(), responseInfo.getInferredMimeType())
-                    issue_detail = 'Passively detect with callback param: %s' % param.getName()
+                    issue_detail = 'Passively detect jsonp endpoint'
 
                     res.append(
                         CustomScanIssue(
@@ -55,7 +56,7 @@ class BurpExtender(IBurpExtender, IScannerCheck):
                             [baseRequestResponse],
                             'JSONP Endpoint',
                             issue_detail,
-                            'Information'
+                            'Medium'
                         )
                     )
         elif (
@@ -64,6 +65,8 @@ class BurpExtender(IBurpExtender, IScannerCheck):
         ):
             # debug
             print('active', self._helpers.analyzeRequest(baseRequestResponse).getUrl(), responseInfo.getInferredMimeType())
+
+            detected_checkRequestResponse = []
             # add callback param to request and fire
             for param_name in CALLBACK_PARAMS:
                 callback_param = \
@@ -80,24 +83,29 @@ class BurpExtender(IBurpExtender, IScannerCheck):
 
                 checkResponse = self._helpers.analyzeResponse(checkRequestResponse.getResponse())
 
-                if (
-                    checkResponse.getInferredMimeType() == 'script' and \
-                    callback_param.getValue() in self._helpers.bytesToString(checkRequestResponse.getResponse())
-                ):
+                if (callback_param.getValue() in self._helpers.bytesToString(checkRequestResponse.getResponse())):
                     # debug
                     print('detect', self._helpers.analyzeRequest(baseRequestResponse).getUrl(), callback_param.getName(), checkResponse.getInferredMimeType())
-                    issue_detail = 'Actively detect with callback param: %s' % callback_param.getName()
-                    res.append(
-                        CustomScanIssue(
-                            baseRequestResponse.getHttpService(),
-                            self._helpers.analyzeRequest(baseRequestResponse).getUrl(),
-                            [checkRequestResponse],
-                            'JSONP Endpoint',
-                            issue_detail,
-                            'Information'
-                        )
+                    detected_checkRequestResponse.append(checkRequestResponse)
+                elif checkResponse.getInferredMimeType() != 'JSON':
+                    # debug
+                    print('potential', self._helpers.analyzeRequest(baseRequestResponse).getUrl(), callback_param.getName(), checkResponse.getInferredMimeType())
+                    detected_checkRequestResponse.append(checkRequestResponse)
+                sleep(1)
+
+            if len(detected_checkRequestResponse) != 0:
+                issue_detail = 'Actively detect jsonp endpoint (or potential)'
+                res.append(
+                    CustomScanIssue(
+                        baseRequestResponse.getHttpService(),
+                        self._helpers.analyzeRequest(baseRequestResponse).getUrl(),
+                        detected_checkRequestResponse,
+                        'JSONP Endpoint',
+                        issue_detail,
+                        'Medium'
                     )
-                    break
+                )
+
 
         return res if res else None
 
